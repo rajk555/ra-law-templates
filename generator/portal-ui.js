@@ -3,7 +3,11 @@
 'use strict';
 if(document.getElementById('ra-draft-warning'))return;
 const core=window.RADraftCore,manifest=window.RADraftManifest;
-const source=document.currentScript.src;const base=new URL('../',source).href;
+const source=document.currentScript.src;const sourceUrl=new URL(source);
+// jsDelivr serves the JavaScript but can reject DOCX binaries. Fetch blank
+// documents from raw GitHub at the exact same immutable commit instead.
+const hosted=sourceUrl.hostname==='cdn.jsdelivr.net'&&sourceUrl.pathname.match(/^\/gh\/rajk555\/ra-law-templates@([a-f0-9]{40})\/generator\//);
+const base=hosted?'https://raw.githubusercontent.com/rajk555/ra-law-templates/'+hosted[1]+'/':new URL('../',source).href;
 const wrap=document.getElementById('ra-wrap'),select=document.getElementById('ra-doc-select'),btn=document.getElementById('ra-btn'),download=document.getElementById('ra-download-btn'),message=document.getElementById('ra-msg');
 if(!core||!manifest||!wrap||!select||!btn||!download)return;
 const group=document.createElement('optgroup');group.label='RA Law Group — Statutory demands and winding up';
