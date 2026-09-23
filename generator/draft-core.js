@@ -13,6 +13,11 @@ function scalar(v){
 }
 function amount(v){const s=scalar(v);if(!/^(?:AUD\s*|\$\s*)?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d{1,2})?$/.test(s))return null;
  const n=Number(s.replace(/AUD|\$|\s|,/g,''));return Number.isFinite(n)&&n>0?n:null;}
+function date(v){
+ const s=scalar(v),m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)||s.match(/^(\d{4})-(\d{2})-(\d{2})(?:T00:00:00(?:\.000)?Z)?$/);
+ if(!m)return '';const iso=m[1].length===4,y=Number(iso?m[1]:m[3]),mo=Number(m[2]),d=Number(iso?m[3]:m[1]);
+ const dt=new Date(Date.UTC(y,mo-1,d));return dt.getUTCFullYear()===y&&dt.getUTCMonth()===mo-1&&dt.getUTCDate()===d?String(d).padStart(2,'0')+'/'+String(mo).padStart(2,'0')+'/'+y:'';
+}
 function build(fields,keys){
  const f=id=>scalar(fields[id]);
  const first=(...ids)=>ids.map(f).find(Boolean)||'';
@@ -21,18 +26,49 @@ function build(fields,keys){
  const value={company_name:entity('pdcMC','cFyUw'),company_acn:acn('Y3hnB','aw2IJ'),creditor_name:entity('pv1e9','N154p','UPOSo'),creditor_acn:acn('zfO7s'),matter_reference:f('piayF'),signing_firm:'RA Law Group'};
  const missing=k=>'[COMPLETE: '+label(k)+']';
  // Full address fields may be used verbatim; never mistake a partial street for a complete address.
- const ro1=f('eoemZ'),ro2=f('wAXru'),suburb=f('PsLSO'),state=f('FZjOg'),postcode=f('U1Hxo');
+ const postal=s=>/^\d{1,2},\d{3}$/.test(s)?s.replace(',',''):s;
+ const ro1=f('eoemZ'),ro2=f('wAXru'),suburb=f('PsLSO'),state=f('FZjOg'),postcode=postal(f('U1Hxo'));
  value.registered_office_line1=ro1;
  value.registered_office_line2=[ro2,suburb||'[COMPLETE: Office suburb]',state||'[COMPLETE: Office state]',postcode||'[COMPLETE: Office postcode]'].filter(Boolean).join(' ');
  value.registered_office=f('4p4R9')||[(ro1||missing('registered_office_line1')),value.registered_office_line2].join(', ');
- value.creditor_address=f('NFlpp')||[f('CSfMZ')||'[COMPLETE: Creditor street]',f('ylQRX'),f('ylg5n')||'[COMPLETE: Creditor suburb]',f('CKTGZ')||'[COMPLETE: Creditor state]',f('CxPJc')||'[COMPLETE: Creditor postcode]'].filter(Boolean).join(', ');
+ value.creditor_address=f('NFlpp')||[f('CSfMZ')||'[COMPLETE: Creditor street]',f('ylQRX'),f('ylg5n')||'[COMPLETE: Creditor suburb]',f('CKTGZ')||'[COMPLETE: Creditor state]',postal(f('CxPJc'))||'[COMPLETE: Creditor postcode]'].filter(Boolean).join(', ');
  // A role lookup ID is not a person's name. Do not borrow contact emails from the client.
  value.lawyer_name=entity('HDqgG');value.responsible_partner=entity('hcSWn');value.contact_name=value.lawyer_name;
- const balances=['dXAgP','5D208'].map(f).filter(Boolean),nums=balances.map(amount);
- if(balances.length&&nums.every(n=>n!==null)&&nums.every(n=>n===nums[0]))value.debt_amount=nums[0].toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2});
- else if(balances.length)value.debt_amount='[VERIFY: Debt amount]';
+ const money=n=>n.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2});
+ // Current balance may legitimately differ from original debt after payments.
+ // Never extract the first number from explanatory multi-matter text.
+ const balance=f('dXAgP')||f('5D208'),principal=amount(balance);
+ if(principal!==null)value.debt_amount=money(principal);
+ else if(balance)value.debt_amount='[VERIFY: Debt amount]';
+ const display=(name,number)=>[name||missing('company_name'),'ACN '+(number||missing('company_acn'))].join(' ');
+ value.plaintiff_display=value.plaintiff_body=display(value.creditor_name||missing('creditor_name'),value.creditor_acn||missing('creditor_acn'));
+ value.defendant1_name=display(value.company_name,value.company_acn);
+ value.individual_defendant_name=value.company_name;
+ value.plaintiff_addr1=value.creditor_address;value.plaintiff_addr2='';
+ value.defendant1_addr1=value.registered_office;value.defendant1_addr2='';
+ for(const [n,nameId,addressId] of [[2,'EY40W','2Q0MI'],[3,'nnbwQ','l7YfE']]){
+  value['defendant'+n+'_name']=entity(nameId)||missing('guarantor'+(n-1)+'_name');
+  value['defendant'+n+'_addr1']=f(addressId)||missing('guarantor'+(n-1)+'_address');
+  value['defendant'+n+'_addr2']='';
+ }
+ value.reference=value.matter_reference;value.defendant1_trading_name=f('ju8al');
+ const trading=f('UPOSo').match(/\bt\s*\/?\s*a(?:s)?\s+(.+)$/i);value.plaintiff_trading_name=trading?trading[1]:'';
+ value.doc_title='Complaint — '+(value.creditor_name||missing('creditor_name'))+' v '+(value.company_name||missing('company_name'));
+ for(const [k,field]of [['contract_date','IN7Ei'],['debt_overdue_date','QVl3u'],['debt_date_from_fmt','7bili'],['debt_date_to_fmt','yce8V']])value[k]=date(f(field))||(f(field)?'[VERIFY: '+label(k)+']':'');
+ value.balance_num=value.debt_amount;
+ const nonnegative=v=>scalar(v)==='0'||scalar(v)==='0.00'||scalar(v)==='$0.00'?0:amount(v);
+ const interest=nonnegative(f('inDnp')),total=nonnegative(f('KErZI'));
+ value.interest_num=interest!==null?money(interest):(f('inDnp')?'[VERIFY: Interest amount]':'');
+ value.total_num=total!==null&&principal!==null&&total>=principal&&(interest===null||Math.abs(total-principal-interest)<0.005)?money(total):(f('KErZI')?'[VERIFY: Total debt]':'');
+ value.days_in_arrears=/^\d+$/.test(f('Iqsgy'))?f('Iqsgy'):'';
+ value.partial_payment_paragraph=f('y9fnb')?'[VERIFY: Payment history — '+f('y9fnb')+']':'[COMPLETE: Payment history or remove if no payments]';
+ value.legal_review='[VERIFY: Correct parties, court, contract clauses, guarantee, service and legal basis before use]';
+ // A contract date is not a guarantee execution date. Debt dates are not interest periods.
+ value.guarantee_date='';value.interest_calculation='[COMPLETE: Interest period, rate, basis and calculation]';
+ value.interest_rate='[VERIFY: Interest rate]';
+ const optional=new Set(['plaintiff_addr2','defendant1_addr2','defendant2_addr2','defendant3_addr2']);
  // Court/service/sworn dates, witnesses, liquidators, schedules and legal facts have no verified mapping.
- const result={};keys.forEach(k=>result[k]=value[k]||missing(k));return result;
+ const result={};keys.forEach(k=>result[k]=value[k]||(optional.has(k)?'':missing(k)));return result;
 }
 const ns='http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 function mergeNotes(zip,data){
@@ -81,6 +117,6 @@ function render(buffer,fields,keys,PZ,DT){
  const doc=new DT(zip,{paragraphLoop:true,linebreaks:true,nullGetter(p){throw Error('Unmapped field '+p.value);}});doc.render(data);
  const result=doc.getZip();const count=highlight(result);return {zip:result,data,count};
 }
-root.RADraftCore={build,render,highlight,label,scalar,amount};
+root.RADraftCore={build,render,highlight,label,scalar,amount,date};
 if(typeof module!=='undefined')module.exports=root.RADraftCore;
 })(typeof window!=='undefined'?window:globalThis);
