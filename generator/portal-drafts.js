@@ -215,6 +215,9 @@ const hosted=sourceUrl.hostname==='cdn.jsdelivr.net'&&sourceUrl.pathname.match(/
 const base=hosted?'https://raw.githubusercontent.com/rajk555/ra-law-templates/'+hosted[1]+'/':new URL('../',source).href;
 const wrap=document.getElementById('ra-wrap'),select=document.getElementById('ra-doc-select'),btn=document.getElementById('ra-btn'),download=document.getElementById('ra-download-btn'),message=document.getElementById('ra-msg');
 if(!core||!manifest||!wrap||!select||!btn||!download)return;
+const fileLink=document.createElement('a');fileLink.id='ra-file-download';fileLink.textContent='Download';fileLink.hidden=true;
+fileLink.style.cssText='padding:10px 16px;background:#fff;color:#111;border:1px solid #ddd;border-radius:8px;text-align:center;text-decoration:none;font:inherit;font-weight:600';
+download.after(fileLink);
 const group=document.createElement('optgroup');group.label='RA Law Group — Statutory demands and winding up';
 manifest.filter(m=>!m.legacy).forEach(m=>{const o=document.createElement('option');o.value='insolvency/'+m.file;o.textContent=m.title;group.appendChild(o);});select.appendChild(group);
 const warning=document.createElement('p');warning.id='ra-draft-warning';warning.style.cssText='background:#fff8cc;color:#332800;padding:12px;border-radius:6px;font-size:14px;line-height:1.5';
@@ -224,7 +227,7 @@ const sourceStatus=document.createElement('p');sourceStatus.id='ra-draft-source'
 let record=null,revision=0,busy=false,last=null;
 const id=()=>new URL(location.href).searchParams.get('recordId');
 const selected=()=>manifest.find(m=>(m.legacy?m.file:'insolvency/'+m.file)===select.value);
-function invalidate(){last=null;revision++;download.disabled=true;message.textContent='';}
+function invalidate(){last=null;revision++;download.disabled=true;download.hidden=false;fileLink.hidden=true;if(fileLink.href.startsWith('blob:'))URL.revokeObjectURL(fileLink.href);fileLink.removeAttribute('href');message.textContent='';}
 function refresh(){
  const m=selected();if(!m){warning.hidden=true;sourceStatus.hidden=true;return;}
  warning.hidden=false;sourceStatus.hidden=false;
@@ -243,7 +246,7 @@ function refresh(){
   document.getElementById('ra-matter-subtitle').textContent='';
   for(const key of ['ra-actionstep-id','ra-client-name','ra-debtor-acn','ra-registered-office','ra-debt-amount','ra-balance-outstanding','ra-total-debt','ra-interest','ra-trading-as','ra-debtor-abn']){const n=document.getElementById(key);if(n)n.textContent='';}
  }
- btn.disabled=busy||!ready;download.disabled=busy||!last;
+ btn.disabled=busy||!ready;download.disabled=busy||!last;download.hidden=!!last;fileLink.hidden=!last;
 }
 function receive(e){
  const d=e.detail;if(!d||String(d.id)!==id()||!d.fields||typeof d.fields!=='object')return;
@@ -252,7 +255,7 @@ function receive(e){
 }
 window.addEventListener('get-record-item-details1',receive);
 select.addEventListener('change',e=>{invalidate();message.textContent='';if(selected()){e.stopImmediatePropagation();refresh();}else{warning.hidden=true;sourceStatus.hidden=true;btn.disabled=false;download.disabled=false;}},true);
-function save(){const u=URL.createObjectURL(last.blob),a=document.createElement('a');a.href=u;a.download=last.filename;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);}
+function save(){if(!fileLink.hasAttribute('href')){fileLink.href=URL.createObjectURL(last.blob);fileLink.download=last.filename;}fileLink.hidden=false;download.hidden=true;fileLink.click();}
 async function generate(){
  const m=selected();if(!m||busy)return;
  if(!record||record.id!==id()){message.textContent='Matter data has not loaded. Refresh the page and try again.';return;}
@@ -267,7 +270,7 @@ async function generate(){
   if(start!==revision||snapshot.id!==id()||file!==select.value)throw Error('The matter or template changed. Generate a fresh draft.');
   const ref=core.scalar(snapshot.fields.piayF)||snapshot.id;
   last={blob:result.zip.generate({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}),filename:('DRAFT - '+m.title+' - '+ref).replace(/[\\/:*?"<>|]/g,' ')+'.docx',id:snapshot.id,file};
-  save();message.className='ok';message.textContent='Word draft downloaded. '+result.count+' highlighted instructions require completion or review. Not ready for signing, service or filing.';
+  save();message.className='ok';message.textContent='Word draft ready. '+result.count+' highlighted instructions require completion or review. Not ready for signing, service or filing.';
  }catch(e){last=null;message.className='err';message.textContent=e.message;}
  finally{busy=false;refresh();}
 }
