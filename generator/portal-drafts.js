@@ -225,6 +225,10 @@ const warning=document.createElement('p');warning.id='ra-draft-warning';warning.
 warning.textContent='Draft Word documents: complete every yellow [COMPLETE: …] field and check every [VERIFY: …] instruction after downloading. Check all legal wording and facts, attach required exhibits, and remove the instructions before signing, serving or filing.';
 wrap.insertBefore(warning,document.getElementById('ra-template-row'));
 const sourceStatus=document.createElement('p');sourceStatus.id='ra-draft-source';sourceStatus.style.cssText='font-size:13px;color:#555';warning.after(sourceStatus);
+// These native fields supply the record event; keep their raw JSON out of the matter view.
+const supportingStyle=document.createElement('style');
+supportingStyle.textContent='#item-details1 .softr-fields-container:has([data-softr-field-id="_t0menx28k"]) { display: none !important; }';
+document.head.appendChild(supportingStyle);
 let record=null,revision=0,busy=false,last=null;
 const id=()=>new URL(location.href).searchParams.get('recordId');
 const selected=()=>manifest.find(m=>(m.legacy?m.file:'insolvency/'+m.file)===select.value);
