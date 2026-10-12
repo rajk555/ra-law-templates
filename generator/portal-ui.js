@@ -24,6 +24,7 @@ const supportingStyle=document.createElement('style');
 supportingStyle.textContent='#item-details1 .softr-fields-container:has([data-softr-field-id="_t0menx28k"]) { display: none !important; }';
 document.head.appendChild(supportingStyle);
 let record=null,revision=0,busy=false,last=null;
+const summaryText=(key,value)=>{const n=document.getElementById(key);if(n&&n.textContent!==value)n.textContent=value;};
 const id=()=>new URL(location.href).searchParams.get('recordId');
 const selected=()=>manifest.find(m=>(m.legacy?m.file:'insolvency/'+m.file)===select.value);
 function invalidate(){last=null;revision++;download.disabled=true;download.hidden=false;fileLink.hidden=true;if(fileLink.href.startsWith('blob:'))URL.revokeObjectURL(fileLink.href);fileLink.removeAttribute('href');message.textContent='';}
@@ -38,9 +39,9 @@ function refresh(){
  if(ready){
   const data=core.build(record.fields,['company_name','creditor_name','matter_reference','company_acn','debt_amount','registered_office','total_num','interest_num']);
   const show=v=>String(v).includes('[COMPLETE:')?'Complete in Word':v;
-  document.getElementById('ra-matter-title').textContent=show(data.company_name);
-  document.getElementById('ra-matter-subtitle').textContent=show(data.creditor_name)+' vs '+show(data.company_name);
-  for(const [key,v] of Object.entries({'ra-actionstep-id':data.matter_reference,'ra-client-name':data.creditor_name,'ra-debtor-acn':data.company_acn,'ra-registered-office':data.registered_office,'ra-debt-amount':data.debt_amount,'ra-balance-outstanding':data.debt_amount,'ra-total-debt':data.total_num,'ra-interest':data.interest_num,'ra-trading-as':core.scalar(record.fields.ju8al)||'Complete in Word','ra-debtor-abn':core.scalar(record.fields.ZgxtS)||'Complete in Word'})){const n=document.getElementById(key);if(n)n.textContent=show(v);}
+  summaryText('ra-matter-title',show(data.company_name));
+  summaryText('ra-matter-subtitle',show(data.creditor_name)+' vs '+show(data.company_name));
+  for(const [key,v] of Object.entries({'ra-actionstep-id':data.matter_reference,'ra-client-name':data.creditor_name,'ra-debtor-acn':data.company_acn,'ra-registered-office':data.registered_office,'ra-debt-amount':data.debt_amount,'ra-balance-outstanding':data.debt_amount,'ra-total-debt':data.total_num,'ra-interest':data.interest_num,'ra-trading-as':core.scalar(record.fields.ju8al)||'Complete in Word','ra-debtor-abn':core.scalar(record.fields.ZgxtS)||'Complete in Word'}))summaryText(key,show(v));
  }else{
   document.getElementById('ra-matter-title').textContent='Loading matter…';
   document.getElementById('ra-matter-subtitle').textContent='';
@@ -54,6 +55,10 @@ function receive(e){
  if(JSON.stringify(record)!==JSON.stringify(next)){record=next;invalidate();}refresh();
 }
 window.addEventListener('get-record-item-details1',receive);
+// The retained legacy block has delayed page-scraping updates. Restore only
+// the summary from the native record, without reading names back from the DOM.
+const summaryObserver=new MutationObserver(()=>{if(record&&selected())refresh();});
+for(const key of ['ra-details','ra-matter-title','ra-matter-subtitle']){const n=document.getElementById(key);if(n)summaryObserver.observe(n,{childList:true,subtree:true,characterData:true});}
 select.addEventListener('change',e=>{invalidate();message.textContent='';if(selected()){e.stopImmediatePropagation();refresh();}else{warning.hidden=true;sourceStatus.hidden=true;btn.disabled=false;download.disabled=false;}},true);
 function save(){if(!fileLink.hasAttribute('href')){fileLink.href=URL.createObjectURL(last.blob);fileLink.download=last.filename;}fileLink.hidden=false;download.hidden=true;fileLink.click();}
 async function generate(){
