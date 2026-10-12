@@ -1,0 +1,10 @@
+const fs=require('node:fs');
+const path=require('node:path');
+const dir=__dirname;
+const previous=fs.readFileSync(path.join(dir,'portal-drafts.js'),'utf8');
+const manifest=previous.match(/window\.RADraftManifest=(\[[\s\S]*?\]);\n/);
+if(!manifest)throw Error('Missing document manifest');
+const documents=JSON.parse(manifest[1]);
+const demand=documents.find(d=>d.file==='stat-demand-and-supporting-affidavit.docx');
+for(const key of ['costs_description','costs_amount_display'])if(!demand.fields.includes(key))demand.fields.push(key);
+fs.writeFileSync(path.join(dir,'portal-drafts.js'),fs.readFileSync(path.join(dir,'draft-core.js'),'utf8')+'\nwindow.RADraftManifest='+JSON.stringify(documents)+';\n'+fs.readFileSync(path.join(dir,'portal-ui.js'),'utf8'));

@@ -51,6 +51,8 @@ function save(){const u=URL.createObjectURL(last.blob),a=document.createElement(
 async function generate(){
  const m=selected();if(!m||busy)return;
  if(!record||record.id!==id()){message.textContent='Matter data has not loaded. Refresh the page and try again.';return;}
+ const issues=core.review(record.fields,m.fields);
+ if(issues.length){message.className='err';message.textContent=issues.join(' ');return;}
  invalidate();const start=revision,snapshot=JSON.parse(JSON.stringify(record)),file=select.value;busy=true;refresh();message.className='';message.textContent='Preparing highlighted Word draft…';
  try{
   const response=await fetch(base+(m.path||file),{cache:'no-cache'});if(!response.ok)throw Error('Template could not be loaded ('+response.status+').');

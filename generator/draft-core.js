@@ -2,6 +2,10 @@
 (function(root){
 'use strict';
 const labels={company_name:'Company name',company_acn:'Company ACN',creditor_name:'Creditor name',creditor_acn:'Creditor ACN',matter_reference:'Matter reference',registered_office:'Registered office',registered_office_line1:'Office address line 1',registered_office_line2:'Office address line 2',lawyer_name:'Lawyer name',lawyer_email:'Lawyer email',liquidator1_name:'Liquidator 1',liquidator2_name:'Liquidator 2',support_deponent:'Support deponent',service_deponent:'Service deponent',demand_deponent:'Demand deponent',demand_service_deponent:'Demand service deponent',witness_name:'Witness name',witness_capacity:'Witness capacity',witness_address:'Witness address',debt_amount:'Debt amount',debt_amount_words:'Debt amount in words'};
+const approvedOffices={
+ VIC:{state:'VIC',address_line1:'Level 40, 140 William Street',address_line2:'Melbourne VIC 3000',phone:'+61 3 9607 8345'},
+ QLD:{state:'QLD',address_line1:'Level 2, 167 Eagle Street',address_line2:'Brisbane QLD 4000',phone:'+61 7 3180 1777',lawyer_name:'Paul Rojas',lawyer_email:'p.rojas@ralawgroup.com.au'}
+};
 function label(key){return labels[key]||key.replace(/(\d)/g,' $1').replace(/_/g,' ').replace(/^./,s=>s.toUpperCase());}
 Object.assign(labels,{firm_address_line1:'Firm street',firm_address_line2:'Firm locality',firm_secondary_address_line1:'Second office street',firm_secondary_address_line2:'Second office locality',court_number:'Court #',document_date:'Doc date',invoice1_amount_display:'Invoice 1 amount',invoice2_amount_display:'Invoice 2 amount',invoice3_amount_display:'Invoice 3 amount'});
 Object.assign(labels,{application_filing_date:'Filing date',application_post_date:'Post date',application_service_date:'Service date',asic_notice_date:'ASIC date'});
@@ -18,12 +22,61 @@ function date(v){
  if(!m)return '';const iso=m[1].length===4,y=Number(iso?m[1]:m[3]),mo=Number(m[2]),d=Number(iso?m[3]:m[1]);
  const dt=new Date(Date.UTC(y,mo-1,d));return dt.getUTCFullYear()===y&&dt.getUTCMonth()===mo-1&&dt.getUTCDate()===d?String(d).padStart(2,'0')+'/'+String(mo).padStart(2,'0')+'/'+y:'';
 }
+function list(v){
+ if(Array.isArray(v))return v.map(scalar);
+ return scalar(v).split(/,\s*/).map(s=>s.trim()).filter(Boolean);
+}
+function sameName(a,b){return scalar(a).replace(/\s+-\s+[A-Za-z0-9_-]+$/,'').replace(/\s+/g,' ').toLowerCase()===scalar(b).replace(/\s+/g,' ').toLowerCase();}
+function draftData(fields){
+ // Only consume an explicit drafting schema, never arbitrary extracted text or names.
+ const candidates=[fields.ra_draft_data,fields['Draft Data'],fields['Drafting Data'],fields.LfWh7,fields.dReQF,fields.hw9CZ,fields.r6sLt];
+ for(const v of Object.values(fields))if(typeof v==='string'&&(/^\s*\{/.test(v)))candidates.push(v);
+ for(let v of candidates){
+  if(typeof v==='string'){try{v=JSON.parse(v);}catch(_){continue;}}
+  if(v&&typeof v==='object'&&!Array.isArray(v)&&v.schema==='ra_draft_data_v1')return v;
+  if(v&&typeof v==='object'&&!Array.isArray(v)&&(Array.isArray(v.invoices)||v.demand_service)){
+   return {...v,creditor:v.creditor||{name:v.plaintiff,acn:v.plaintiffACN||v.plaintiffAcn},
+    invoices:(v.invoices||[]).map(i=>({...i,description:scalar(i.description)||[scalar(i.no||i.number)?'Invoice '+scalar(i.no||i.number):'',date(i.date)?'dated '+date(i.date):''].filter(Boolean).join(' ')})),
+    debt:v.debt&&typeof v.debt==='object'?v.debt:{claim_amount:v.totalClaimEmail||v.csdAmount,collection_costs:v.collectionCostsEmail||v.collectionCosts,legal_costs:v.legalCosts,source_totals:[{source:'Instructions',amount:v.totalClaimEmail},{source:'Debt summary',amount:v.totalClaimTable}]},
+    demand_service:v.demand_service||{deponent:v.demandServiceDeponent,post_date:v.demandPostDate,service_date:v.demandServiceDate,affidavit_date:v.demandServiceAffidavitDate}};
+  }
+ }
+ return {};
+}
+function parties(fields,extra){
+ const names=list(fields.pv1e9),numbers=list(fields.zfO7s);
+ // UPOSo is the matter's explicit Plaintiff; linked Client lookups may include referrers.
+ const explicit=scalar(extra.creditor?.name)||scalar(fields.UPOSo)||scalar(fields['Plaintiff']);
+ const selected=explicit||((names.length===1)?names[0]:'');
+ const index=names.findIndex(n=>sameName(n,selected));
+ const one=key=>{const values=list(fields[key]);return index>=0&&values.length===names.length?values[index]:(names.length<=1&&values.length<=1?values[0]||'':'');};
+ const number=scalar(extra.creditor?.acn)||(index>=0&&numbers.length===names.length?numbers[index]:(names.length<=1&&numbers.length===1?numbers[0]:''));
+ return {name:selected,acn:number,address:scalar(extra.creditor?.address)||one('NFlpp'),street:one('CSfMZ')||one('ylQRX'),suburb:one('ylg5n'),state:one('CKTGZ'),postcode:one('CxPJc'),ambiguous:!/[A-Za-z]/.test(selected)||names.length>1&&index<0&&!extra.creditor?.acn};
+}
+function review(fields,keys){
+ const extra=draftData(fields),p=parties(fields,extra),issues=[];
+ if(p.ambiguous)issues.push('Select one creditor in the Plaintiff field and provide its matching ACN/address. The referring agency must remain separate.');
+ if(/creditor_acn|plaintiff_display|plaintiff_body/.test(keys.join(' '))&&!/^\d{9}$/.test(p.acn.replace(/\s/g,'')))issues.push('The selected creditor needs one valid nine-digit ACN.');
+ const invoices=extra.invoices;
+ if(Array.isArray(invoices)&&invoices.length>3&&keys.some(k=>/^invoice\d/.test(k)))issues.push('This precedent has three invoice rows. Use a precedent with a full invoice schedule for more than three invoices.');
+ if(Array.isArray(invoices)&&keys.some(k=>/^invoice\d/.test(k))&&invoices.some(i=>!scalar(i.description)||amount(i.amount)===null))issues.push('Each invoice needs a description and a valid amount.');
+ if(Array.isArray(invoices)&&invoices.length&&keys.some(k=>/^invoice\d/.test(k))){
+  const sum=invoices.reduce((n,i)=>n+(amount(i.amount)||0),0)+(amount(extra.debt?.collection_costs)||0)+(amount(extra.debt?.legal_costs)||0);
+  const claim=amount(extra.debt?.claim_amount??fields.dXAgP);
+  if(claim!==null&&Math.abs(sum-claim)>.005)issues.push('The invoice schedule and recorded costs do not add up to the claim amount. Reconcile the breakdown before generating.');
+ }
+ const claim=amount(extra.debt?.claim_amount??fields.dXAgP),sourceTotals=extra.debt?.source_totals||[];
+ if(claim!==null&&sourceTotals.some(s=>amount(s.amount)!==null&&Math.abs(amount(s.amount)-claim)>.005)&&!scalar(extra.debt?.reconciliation))issues.push('The source documents disagree on the claim amount. Record the reconciliation before generating.');
+ if(/\b(?:confirm|discrepan|conflict)\b/i.test(scalar(fields.y9fnb))&&!scalar(extra.debt?.reconciliation))issues.push('The matter payment/debt notes flag conflicting amounts. Reconcile them before generating.');
+ return [...new Set(issues)];
+}
 function build(fields,keys){
  const f=id=>scalar(fields[id]);
  const first=(...ids)=>ids.map(f).find(Boolean)||'';
  const entity=(...ids)=>{const s=first(...ids);return /[A-Za-z]/.test(s)?s:'';};
  const acn=(...ids)=>{const s=first(...ids).replace(/\s/g,'');return /^\d{9}$/.test(s)?s.replace(/(\d{3})(\d{3})(\d{3})/,'$1 $2 $3'):'';};
- const value={company_name:entity('pdcMC','cFyUw'),company_acn:acn('Y3hnB','aw2IJ'),creditor_name:entity('pv1e9','N154p','UPOSo'),creditor_acn:acn('zfO7s'),matter_reference:f('piayF'),signing_firm:'RA Law Group'};
+ const extra=draftData(fields),party=parties(fields,extra);
+ const value={company_name:entity('pdcMC','cFyUw'),company_acn:acn('Y3hnB','aw2IJ'),creditor_name:party.name,creditor_acn:acnValue(party.acn),matter_reference:f('piayF'),signing_firm:'RA Law Group'};
  const missing=k=>'[COMPLETE: '+label(k)+']';
  // Full address fields may be used verbatim; never mistake a partial street for a complete address.
  const postal=s=>/^\d{1,2},\d{3}$/.test(s)?s.replace(',',''):s;
@@ -31,13 +84,13 @@ function build(fields,keys){
  value.registered_office_line1=ro1;
  value.registered_office_line2=[ro2,suburb||'[COMPLETE: Office suburb]',state||'[COMPLETE: Office state]',postcode||'[COMPLETE: Office postcode]'].filter(Boolean).join(' ');
  value.registered_office=f('4p4R9')||[(ro1||missing('registered_office_line1')),value.registered_office_line2].join(', ');
- value.creditor_address=f('NFlpp')||[f('CSfMZ')||'[COMPLETE: Creditor street]',f('ylQRX'),f('ylg5n')||'[COMPLETE: Creditor suburb]',f('CKTGZ')||'[COMPLETE: Creditor state]',postal(f('CxPJc'))||'[COMPLETE: Creditor postcode]'].filter(Boolean).join(', ');
+ value.creditor_address=party.address||[party.street||'[COMPLETE: Creditor street]',party.suburb||'[COMPLETE: Creditor suburb]',party.state||'[COMPLETE: Creditor state]',postal(party.postcode)||'[COMPLETE: Creditor postcode]'].filter(Boolean).join(', ');
  // A role lookup ID is not a person's name. Do not borrow contact emails from the client.
  value.lawyer_name=entity('HDqgG');value.responsible_partner=entity('hcSWn');value.contact_name=value.lawyer_name;
  const money=n=>n.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2});
  // Current balance may legitimately differ from original debt after payments.
  // Never extract the first number from explanatory multi-matter text.
- const balance=f('dXAgP')||f('5D208'),principal=amount(balance);
+ const balance=scalar(extra.debt?.claim_amount)||f('dXAgP')||f('5D208'),principal=amount(balance);
  if(principal!==null)value.debt_amount=money(principal);
  else if(balance)value.debt_amount='[VERIFY: Debt amount]';
  const display=(name,number)=>[name||missing('company_name'),'ACN '+(number||missing('company_acn'))].join(' ');
@@ -66,7 +119,34 @@ function build(fields,keys){
  // A contract date is not a guarantee execution date. Debt dates are not interest periods.
  value.guarantee_date='';value.interest_calculation='[COMPLETE: Interest period, rate, basis and calculation]';
  value.interest_rate='[VERIFY: Interest rate]';
+ // Firm routing is deterministic and uses approved office records, not an AI guess.
+ const office=extra.office||extra.offices?.[state]||approvedOffices[state];
+ if(office&&(!office.state||scalar(office.state)===state)){
+  value.firm_address_line1=scalar(office.address_line1);value.firm_address_line2=scalar(office.address_line2);
+  value.firm_phone=scalar(office.phone);
+ }
+ value.lawyer_email=scalar(extra.lawyer?.email)||scalar(office?.lawyer_email);value.lawyer_name=scalar(extra.lawyer?.name)||value.lawyer_name||scalar(office?.lawyer_name);
+ value.contact_name=value.lawyer_name;
+ const invoices=Array.isArray(extra.invoices)?extra.invoices:[];
+ for(let n=1;n<=3;n++){
+  const invoice=invoices[n-1];
+  if(invoice){value['invoice'+n+'_description']=scalar(invoice.description);const a=amount(invoice.amount);value['invoice'+n+'_amount_display']=a===null?'':money(a);}
+  else if(invoices.length){value['invoice'+n+'_description']='';value['invoice'+n+'_amount_display']='';}
+ }
+ const service=extra.demand_service||{};
+ value.demand_service_deponent=scalar(service.deponent);
+ value.demand_post_date=date(service.post_date);value.demand_service_date=date(service.service_date);
+ value.demand_service_affidavit_date=date(service.affidavit_date);
+ value.demand_service_exhibit=scalar(service.exhibit);
+ value.posting_location=scalar(service.posting_location);value.posting_time=scalar(service.posting_time);
+ value.demand_date=date(extra.demand?.date);value.demand_deponent=scalar(extra.demand?.deponent);
+ value.demand_affidavit_date=date(extra.demand?.affidavit_date);
+ value.debt_amount_words=scalar(extra.debt?.amount_words);
+ const costs=[['Claimed collection costs',amount(extra.debt?.collection_costs)],['Claimed legal costs',amount(extra.debt?.legal_costs)]].filter(([,a])=>a!==null);
+ value.costs_description=costs.map(([d])=>d).join('\n');value.costs_amount_display=costs.map(([,a])=>money(a)).join('\n');
  const optional=new Set(['plaintiff_addr2','defendant1_addr2','defendant2_addr2','defendant3_addr2']);
+ optional.add('costs_description');optional.add('costs_amount_display');
+ if(invoices.length)for(let n=invoices.length+1;n<=3;n++){optional.add('invoice'+n+'_description');optional.add('invoice'+n+'_amount_display');}
  // Court/service/sworn dates, witnesses, liquidators, schedules and legal facts have no verified mapping.
  const result={};keys.forEach(k=>result[k]=value[k]||(optional.has(k)?'':missing(k)));return result;
 }
@@ -117,6 +197,7 @@ function render(buffer,fields,keys,PZ,DT){
  const doc=new DT(zip,{paragraphLoop:true,linebreaks:true,nullGetter(p){throw Error('Unmapped field '+p.value);}});doc.render(data);
  const result=doc.getZip();const count=highlight(result);return {zip:result,data,count};
 }
-root.RADraftCore={build,render,highlight,label,scalar,amount,date};
+function acnValue(v){const s=scalar(v).replace(/\s/g,'');return /^\d{9}$/.test(s)?s.replace(/(\d{3})(\d{3})(\d{3})/,'$1 $2 $3'):'';}
+root.RADraftCore={build,render,highlight,label,scalar,amount,date,draftData,parties,review};
 if(typeof module!=='undefined')module.exports=root.RADraftCore;
 })(typeof window!=='undefined'?window:globalThis);
