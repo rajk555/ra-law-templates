@@ -10,6 +10,7 @@ assert.match(core.build({...fields,FZjOg:'NSW'},keys).firm_address_line1,/COMPLE
 assert.ok(core.review({...fields,UPOSo:''},keys).length);
 const enriched={...fields,'Draft Data':JSON.stringify({schema:'ra_draft_data_v1',invoices:[{description:'Invoice EX-1 dated 1 June 2026',amount:1000}],demand_service:{deponent:'Example Deponent',post_date:'09/06/2026'},debt:{claim_amount:1000}})};
 data=core.build(enriched,keys);assert.equal(data.invoice1_amount_display,'1,000.00');assert.equal(data.invoice2_description,'');assert.equal(data.demand_service_deponent,'Example Deponent');assert.equal(data.demand_post_date,'09/06/2026');
+assert.equal(core.build({...fields,LfWh7:{value:enriched['Draft Data']}},keys).invoice1_amount_display,'1,000.00');
 assert.ok(core.review({...fields,y9fnb:'Source totals differ - confirm'},keys).length);
 assert.ok(core.review({...enriched,y9fnb:'confirm'},keys).length);
 const resolved=JSON.parse(enriched['Draft Data']);resolved.debt.reconciliation='Reviewed source totals';

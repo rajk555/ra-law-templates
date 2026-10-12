@@ -32,6 +32,7 @@ function draftData(fields){
  const candidates=[fields.ra_draft_data,fields['Draft Data'],fields['Drafting Data'],fields.LfWh7,fields.dReQF,fields.hw9CZ,fields.r6sLt];
  for(const v of Object.values(fields))if(typeof v==='string'&&(/^\s*\{/.test(v)))candidates.push(v);
  for(let v of candidates){
+  if(v&&typeof v==='object'&&!v.schema&&(Array.isArray(v)||'value' in v||'text' in v))v=scalar(v);
   if(typeof v==='string'){try{v=JSON.parse(v);}catch(_){continue;}}
   if(v&&typeof v==='object'&&!Array.isArray(v)&&v.schema==='ra_draft_data_v1')return v;
   if(v&&typeof v==='object'&&!Array.isArray(v)&&(Array.isArray(v.invoices)||v.demand_service)){
@@ -235,6 +236,7 @@ function refresh(){
  const ready=record&&record.id===id();
  const connectionIncomplete=ready&&!['pdcMC','cFyUw'].some(k=>Object.prototype.hasOwnProperty.call(record.fields,k));
  sourceStatus.textContent=ready?(connectionIncomplete?'Warning: Softr is not sending all matter fields. These drafts may omit information held in the database. Fix the source connection before relying on auto-fill.':'Using available fields from the selected matter. Unavailable information will be highlighted in Word.'):'Loading selected matter data…';
+ if(ready){const extra=core.draftData(record.fields);sourceStatus.textContent+=' Invoice rows: '+(extra.invoices?.length||0)+'. Service deponent: '+(extra.demand_service?.deponent||'not recorded')+'.';}
  if(ready){
   const data=core.build(record.fields,['company_name','creditor_name','matter_reference','company_acn','debt_amount','registered_office','total_num','interest_num']);
   const show=v=>String(v).includes('[COMPLETE:')?'Complete in Word':v;

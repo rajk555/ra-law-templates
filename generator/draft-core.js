@@ -32,6 +32,7 @@ function draftData(fields){
  const candidates=[fields.ra_draft_data,fields['Draft Data'],fields['Drafting Data'],fields.LfWh7,fields.dReQF,fields.hw9CZ,fields.r6sLt];
  for(const v of Object.values(fields))if(typeof v==='string'&&(/^\s*\{/.test(v)))candidates.push(v);
  for(let v of candidates){
+  if(v&&typeof v==='object'&&!v.schema&&(Array.isArray(v)||'value' in v||'text' in v))v=scalar(v);
   if(typeof v==='string'){try{v=JSON.parse(v);}catch(_){continue;}}
   if(v&&typeof v==='object'&&!Array.isArray(v)&&v.schema==='ra_draft_data_v1')return v;
   if(v&&typeof v==='object'&&!Array.isArray(v)&&(Array.isArray(v.invoices)||v.demand_service)){
